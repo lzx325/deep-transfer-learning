@@ -4,6 +4,7 @@
 import torch
 
 def mmd_linear(f_of_X, f_of_Y):
+    import ipdb; ipdb.set_trace()
     delta = f_of_X - f_of_Y
     loss = torch.mean(torch.mm(delta, torch.transpose(delta, 0, 1)))
     return loss

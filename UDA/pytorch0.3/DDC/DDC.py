@@ -9,7 +9,6 @@ import math
 import data_loader
 import ResNet as models
 from torch.utils import model_zoo
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 # Training settings
 batch_size = 32
@@ -46,7 +45,8 @@ def load_pretrain(model):
     pretrained_dict = model_zoo.load_url(url)
     model_dict = model.state_dict()
     for k, v in model_dict.items():
-        if not "cls_fc" in k:
+        # lizx: added and not "num_batches_tracked" in k
+        if not "cls_fc" in k and not "num_batches_tracked" in k:
             model_dict[k] = pretrained_dict[k[k.find(".") + 1:]]
     model.load_state_dict(model_dict)
     return model
@@ -85,26 +85,27 @@ def train(epoch, model):
         if i % log_interval == 0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\tsoft_Loss: {:.6f}\tmmd_Loss: {:.6f}'.format(
                 epoch, i * len(data_source), len_source_dataset,
-                100. * i / len_source_loader, loss.data[0], loss_cls.data[0], loss_mmd.data[0]))
+                100. * i / len_source_loader, loss.data.item(), loss_cls.data.item(), loss_mmd.data.item()))
 
 def test(model):
     model.eval()
     test_loss = 0
     correct = 0
+    with torch.no_grad():
+        for data, target in target_test_loader:
+            if cuda:
+                data, target = data.cuda(), target.cuda()
+            # lizx: removed volatile
+            data, target = Variable(data), Variable(target)
+            s_output, t_output = model(data, data)
+            test_loss += F.nll_loss(F.log_softmax(s_output, dim = 1), target, size_average=False).data.item() # sum up batch loss
+            pred = s_output.data.max(1)[1] # get the index of the max log-probability
+            correct += pred.eq(target.data.view_as(pred)).cpu().sum()
 
-    for data, target in target_test_loader:
-        if cuda:
-            data, target = data.cuda(), target.cuda()
-        data, target = Variable(data, volatile=True), Variable(target)
-        s_output, t_output = model(data, data)
-        test_loss += F.nll_loss(F.log_softmax(s_output, dim = 1), target, size_average=False).data[0] # sum up batch loss
-        pred = s_output.data.max(1)[1] # get the index of the max log-probability
-        correct += pred.eq(target.data.view_as(pred)).cpu().sum()
-
-    test_loss /= len_target_dataset
-    print('\n{} set: Average loss: {:.4f}, Accuracy: {}/{} ({:.2f}%)\n'.format(
-        target_name, test_loss, correct, len_target_dataset,
-        100. * correct / len_target_dataset))
+        test_loss /= len_target_dataset
+        print('\n{} set: Average loss: {:.4f}, Accuracy: {}/{} ({:.2f}%)\n'.format(
+            target_name, test_loss, correct, len_target_dataset,
+            100. * correct / len_target_dataset))
     return correct
 
 
@@ -114,6 +115,7 @@ if __name__ == '__main__':
     print(model)
     if cuda:
         model.cuda()
+    # TODO
     model = load_pretrain(model)
     for epoch in range(1, epochs + 1):
         train(epoch, model)
